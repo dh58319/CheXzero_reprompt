@@ -13,7 +13,7 @@ from torch.utils import data
 from torch import nn
 import torch.optim as optim
 from torchvision.transforms import Compose, Normalize, Resize, InterpolationMode
-
+import torchvision.transforms as transforms
 import sys
 sys.path.append('../..')
 
@@ -64,9 +64,9 @@ class CXRDataset(data.Dataset):
         
         return sample
 
-def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrained=False, verbose=False): 
+def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrained=False, verbose=False,cuda= 0):
     if torch.cuda.is_available():  
-        dev = "cuda:0" 
+        dev = f"cuda:{cuda}"
         cuda_available = True
         print('Using CUDA.')
     else:  
@@ -78,12 +78,13 @@ def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrai
     
     if cuda_available: 
         torch.cuda.set_device(device)
+        print('from load_data, Set device to ', device)
 
     if pretrained: 
         input_resolution = 224
         transform = Compose([
             Normalize((101.48761, 101.48761, 101.48761), (83.43944, 83.43944, 83.43944)),
-            Resize(input_resolution, interpolation=InterpolationMode.BICUBIC),
+            Resize(input_resolution, interpolation=transforms.InterpolationMode.BILINEAR),
         ])
         print('Interpolation Mode: ', InterpolationMode.BICUBIC)
         print("Finished image transforms for pretrained model.")
@@ -106,11 +107,12 @@ def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrai
             if i == 3:
                 break
     
-    loader_params = {'batch_size':batch_size, 'shuffle': True, 'num_workers': 0}
-    data_loader = data.DataLoader(torch_dset, **loader_params)
+    loader_params = {'batch_size':batch_size, 'shuffle': True, 'num_workers': 4}
+    print(f"Finished loading data. params: {loader_params}")
+    data_loader = data.DataLoader(torch_dset, **loader_params, pin_memory=True)
     return data_loader, device
     
-def load_clip(model_path=None, pretrained=False, context_length=77):
+def load_clip(model_path=None, pretrained=False, context_length=77, cuda=0):
     '''
     FUNCTION: load_clip
     -------------------------------
@@ -140,7 +142,7 @@ def load_clip(model_path=None, pretrained=False, context_length=77):
     }
     
     # set device 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{cuda}" if torch.cuda.is_available() else "cpu")
     
     if pretrained: 
         # load clip pre-trained model
@@ -159,7 +161,8 @@ def load_clip(model_path=None, pretrained=False, context_length=77):
 def preprocess_text(texts, model):
 #     if model.context_length is None: 
 #         model = model.module
-        
+
+
     _tokenizer = SimpleTokenizer()
     sot_token = _tokenizer.encoder["<|startoftext|>"]
     eot_token = _tokenizer.encoder["<|endoftext|>"]
@@ -171,30 +174,10 @@ def preprocess_text(texts, model):
             tokens = tokens[:model.context_length]
             tokens[model.context_length - 1] = eot_token
         result[i, :len(tokens)] = torch.tensor(tokens)
+
+
     return result
 
-def make(config, cxr_filepath, txt_filepath, model_path=None): 
-    '''
-    FUNCTION: make
-    ---------------------------------
-    This function makes the model, the data loader, loss and optimizer. 
-    
-    args: 
-        * config - dict, configuration of experiment
-        * cxr_filepath - string, filepath to chest x-ray images
-        * txt_filepath - string, filepath to corresponding text reports
-        * model_path - string, filepath to previously trained model
-    '''
-    data_loader, device = load_data(cxr_filepath, txt_filepath, batch_size=config.batch_size, pretrained=config.pretrained, column=config.column)
-    model = load_clip(model_path=model_path, pretrained=config.pretrained, context_length=config.context_length)
-    model.to(device)
-    print('Model on Device.')
-
-    # make the optimizer 
-    criterion = nn.CrossEntropyLoss().cuda()
-    # todo: incorporate - torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1, verbose=False)
-    optimizer = optim.AdamW(model.parameters(), lr=config.lr)
-    return model, data_loader, device, criterion, optimizer
 
 
 def train_main(cxr_filepath, txt_filepath, hyperparams, output_path, model_path=None, pretrained=False): 

@@ -48,7 +48,7 @@ def img_to_hdf5(cxr_paths: List[Union[str, Path]], out_filepath: str, resolution
     dset_size = len(cxr_paths)
     failed_images = []
     with h5py.File(out_filepath,'w') as h5f:
-        img_dset = h5f.create_dataset('cxr', shape=(dset_size, resolution, resolution))    
+        img_dset = h5f.create_dataset('cxr', shape=(dset_size, resolution, resolution))
         for idx, path in enumerate(tqdm(cxr_paths)):
             try: 
                 # read image using cv2
@@ -98,12 +98,16 @@ def getIndexOfLast(l, element):
 def write_report_csv(cxr_paths, txt_folder, out_path):
     imps = {"filename": [], "impression": []}
     txt_reports = []
-    for cxr_path in cxr_paths:
+    for cxr_path in tqdm(cxr_paths):
         tokens = cxr_path.split('/')
+
         study_num = tokens[-2]
         patient_num = tokens[-3]
-        patient_group = tokens[-4]
+        patient_group = patient_num[0:3]
+
         txt_report = txt_folder + patient_group + '/' + patient_num + '/' + study_num + '.txt'
+
+
         filename = study_num + '.txt'
         f = open(txt_report, 'r')
         s = f.read()
@@ -139,6 +143,7 @@ def write_report_csv(cxr_paths, txt_folder, out_path):
                 imp = " ".join(s_split[begin:end])
         else:
             imp = 'NO IMPRESSION'
+
             
         imps["impression"].append(imp)
         imps["filename"].append(filename)

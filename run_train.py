@@ -9,6 +9,8 @@ from torch import nn
 import torch.optim as optim
 from torchvision.transforms import Compose, Normalize, Resize
 
+import wandb
+
 import clip
 from model import CLIP
 from simple_tokenizer import SimpleTokenizer
@@ -18,12 +20,12 @@ from zero_shot import run_cxr_zero_shot, run_zero_shot
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cxr_filepath', type=str, default='data/cxr.h5', help="Directory to load chest x-ray image data from.")
-    parser.add_argument('--txt_filepath', type=str, default='data/mimic_impressions.csv', help="Directory to load radiology report impressions text from.")
+    parser.add_argument('--cxr_filepath', type=str, default='./data/cxr.h5', help="Directory to load chest x-ray image data from.")
+    parser.add_argument('--txt_filepath', type=str, default='./data/mimic_impressions.csv', help="Directory to load radiology report impressions text from.")
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--epochs', type=int, default=4)
     parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--save_interval', type=int, default=100)
+    parser.add_argument('--save_interval', type=int, default=5000)
     parser.add_argument('--log_interval', type=int, default=10)
     parser.add_argument('--save_dir', type=str, default="checkpoints/", help="Directory to save the trained model.")
     parser.add_argument('--seed', type=int, default=1234)
@@ -32,6 +34,7 @@ def parse_args():
     parser.add_argument('--context_length', type=int, default=77)
     parser.add_argument('--random_init', action='store_true')
     parser.add_argument('--model_name', type=str, default="pt-imp")
+    parser.add_argument('--cuda', type=int, default=0)
     args = parser.parse_args()
     return args
 
@@ -52,10 +55,10 @@ def model_pipeline(config, verbose=0):
 
 def make(config): 
     pretrained = not config.random_init
-    data_loader, device = load_data(config.cxr_filepath, config.txt_filepath, batch_size=config.batch_size, pretrained=pretrained, column="impression")
-    model = load_clip(model_path=None, pretrained=pretrained, context_length=config.context_length)
+    data_loader, device = load_data(config.cxr_filepath, config.txt_filepath, batch_size=config.batch_size, pretrained=pretrained, column="impression", cuda= config.cuda)
+    model = load_clip(model_path=None, pretrained=pretrained, context_length=config.context_length, cuda = config.cuda)
     model.to(device)
-    print('Model on Device.')
+    print(f'----------Model on Device.-----------{device}')
 
     # make the optimizer 
     criterion = nn.CrossEntropyLoss().cuda()
@@ -114,12 +117,13 @@ def train_batch(images, texts, model, device, criterion, optimizer):
     # Create labels
     batch_size = images.shape[0]
     labels = torch.arange(batch_size).to(device)
-    
+
+    #raise Exception("stop")
     # Compute loss
     loss_img = criterion(logits_per_image, labels)
     loss_txt = criterion(logits_per_text, labels)
     loss = (loss_img + loss_txt)/2 # avg. img and txt loss
-
+    
     # Backward pass ⬅
     optimizer.zero_grad()
     loss.backward()
@@ -131,13 +135,16 @@ def train_batch(images, texts, model, device, criterion, optimizer):
 
 def train_log(loss, example_ct, epoch):
     loss = float(loss)
+    wandb.log({"epoch": epoch, "loss": loss})
     print(f"Loss after " + str(example_ct).zfill(5) + f" examples: {loss:.3f}")
     
 def save(model, path): 
     torch.save(model.state_dict(), path)
     
 if __name__ == "__main__":
+
     args = parse_args()
+    wandb.init(project="CheXzero", name=args.model_name)
     model = model_pipeline(args)
     
 

@@ -7,6 +7,7 @@ from PIL import Image
 import h5py
 import matplotlib.pyplot as plt
 from typing import List, Tuple
+import random
 
 import torch
 from torch.utils import data
@@ -193,6 +194,7 @@ def run_single_prediction(cxr_labels, template, model, loader, softmax_eval=True
     Returns list, predictions from the given template. 
     """
     cxr_phrase = [template]
+    print(cxr_labels)
     zeroshot_weights = zeroshot_classifier(cxr_labels, cxr_phrase, model, context_length=context_length)
     y_pred = predict(loader, model, zeroshot_weights, softmax_eval=softmax_eval)
     return y_pred
@@ -241,19 +243,31 @@ def process_alt_labels(alt_labels_dict, cxr_labels):
     
     return alt_label_list, alt_label_idx_map 
 
-def run_softmax_eval(model, loader, eval_labels: list, pair_template: tuple, context_length: int = 77): 
+
+
+def get_pair_template():
+    pos = "{}"
+
+    # ratio = random.random()
+    neg = random.choice(["no evidence of {}", "no signs of {}"])
+
+    return (pos, neg)
+def run_softmax_eval(model, loader, eval_labels: list, pair_template: tuple, context_length: int = 77):
     """
     Run softmax evaluation to obtain a single prediction from the model.
     """
      # get pos and neg phrases
-    pos = pair_template[0]
-    neg = pair_template[1]
+    pos , neg = get_pair_template()
+    # pos = pair_template[0]
+    # neg = pair_template[1]
+
+    #get false label
 
     # get pos and neg predictions, (num_samples, num_classes)
     pos_pred = run_single_prediction(eval_labels, pos, model, loader, 
-                                     softmax_eval=True, context_length=context_length) 
+                                     softmax_eval=False, context_length=context_length)
     neg_pred = run_single_prediction(eval_labels, neg, model, loader, 
-                                     softmax_eval=True, context_length=context_length) 
+                                     softmax_eval=False, context_length=context_length)
 
     # compute probabilities with softmax
     sum_pred = np.exp(pos_pred) + np.exp(neg_pred)
@@ -315,6 +329,8 @@ def run_experiment(model, cxr_labels, cxr_templates, loader, y_true, alt_labels_
 
     return results, y_pred
 
+
+
 def make_true_labels(
     cxr_true_labels_path: str, 
     cxr_labels: List[str],
@@ -336,6 +352,11 @@ def make_true_labels(
     """
     # create ground truth labels
     full_labels = pd.read_csv(cxr_true_labels_path)
+
+    #drop if path contains view2 or view3
+    full_labels = full_labels[~full_labels['Path'].str.contains('view2')]
+    full_labels = full_labels[~full_labels['Path'].str.contains('view3')]
+
     if cutlabels: 
         full_labels = full_labels.loc[:, cxr_labels]
     else: 
@@ -489,6 +510,10 @@ def run_zero_shot(cxr_labels, cxr_templates, model_path, cxr_filepath, final_lab
         cxr_labels=cxr_labels, 
         cutlabels=cutlabels,
     )
+
+    print("y_true: ", y_true)
+
+    y_neg = 1 - y_true # get negative labels
 
     # run multiphrase experiment
     results, y_pred = run_experiment(model, cxr_labels, cxr_templates, loader, y_true, 
